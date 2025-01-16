@@ -10,8 +10,7 @@ namespace Unity.Robotics.UrdfImporter.Control
     public class Controller : MonoBehaviour
     {
         private ArticulationBody[] articulationChain;
-        private Color[] prevColor;
-        private int previousIndex;
+        private Renderer[] previousRenderers;
 
         [InspectorReadOnly(hideInEditMode: true)]
         public string selectedJoint;
@@ -26,84 +25,101 @@ namespace Unity.Robotics.UrdfImporter.Control
         public float torque = 100f;
         public float acceleration = 5f;
 
-        [Tooltip("Color to highlight the currently selected joint")]
-        public Color highLightColor = new Color(1.0f, 0, 0, 1.0f);
+        [Tooltip("Material to highlight the currently selected joint")]
+        public Material highlightMaterial;
 
         void Start()
         {
-            previousIndex = selectedIndex = 1;
+            previousRenderers = null;
+            selectedIndex = 1;
             this.gameObject.AddComponent<FKRobot>();
             articulationChain = this.GetComponentsInChildren<ArticulationBody>();
-            int defDyanmicVal = 10;
+            int defDynamicVal = 10;
+
             foreach (ArticulationBody joint in articulationChain)
             {
                 joint.gameObject.AddComponent<JointControl>();
-                joint.jointFriction = defDyanmicVal;
-                joint.angularDamping = defDyanmicVal;
+                joint.jointFriction = defDynamicVal;
+                joint.angularDamping = defDynamicVal;
                 ArticulationDrive currentDrive = joint.xDrive;
                 currentDrive.forceLimit = forceLimit;
                 joint.xDrive = currentDrive;
             }
-            DisplaySelectedJoint(selectedIndex);
-            StoreJointColors(selectedIndex);
-        }
 
-        void SetSelectedJointIndex(int index)
-        {
-            if (articulationChain.Length > 0) 
-            {
-                selectedIndex = (index + articulationChain.Length) % articulationChain.Length;
-            }
+            HighlightJoint(selectedIndex);
         }
 
         void Update()
         {
-            bool SelectionInput1 = Input.GetKeyDown(KeyCode.RightArrow);
-            bool SelectionInput2 = Input.GetKeyDown(KeyCode.LeftArrow);
+            bool selectionInputNext = Input.GetKeyDown(KeyCode.RightArrow);
+            bool selectionInputPrev = Input.GetKeyDown(KeyCode.LeftArrow);
 
-            SetSelectedJointIndex(selectedIndex);
-            UpdateDirection(selectedIndex);
-
-            if (SelectionInput2)
+            if (selectionInputPrev)
             {
-                SetSelectedJointIndex(selectedIndex - 1);
-                Highlight(selectedIndex);
+                SelectPreviousJoint();
             }
-            else if (SelectionInput1)
+            else if (selectionInputNext)
             {
-                SetSelectedJointIndex(selectedIndex + 1);
-                Highlight(selectedIndex);
+                SelectNextJoint();
             }
 
             UpdateDirection(selectedIndex);
         }
 
-        private void Highlight(int selectedIndex)
+        private void HighlightJoint(int index)
         {
-            if (selectedIndex == previousIndex || selectedIndex < 0 || selectedIndex >= articulationChain.Length) 
+            // Remove highlight from the previous joint
+            if (previousRenderers != null)
             {
-                return;
+                foreach (var renderer in previousRenderers)
+                {
+                    // Restore the original material
+                    if (renderer != null)
+                    {
+                        renderer.materials = renderer.materials[..^1]; // Remove the last material (highlight)
+                    }
+                }
             }
 
-            ResetJointColors(previousIndex);
-            StoreJointColors(selectedIndex);
-            DisplaySelectedJoint(selectedIndex);
-
-            Renderer[] rendererList = articulationChain[selectedIndex].transform.GetChild(0).GetComponentsInChildren<Renderer>();
-
-            foreach (var mesh in rendererList)
+            // Highlight the new joint
+            if (index >= 0 && index < articulationChain.Length)
             {
-                MaterialExtensions.SetMaterialColor(mesh.material, highLightColor);
+                ArticulationBody currentJoint = articulationChain[index];
+                previousRenderers = currentJoint.transform.GetChild(0).GetComponentsInChildren<Renderer>();
+
+                foreach (var renderer in previousRenderers)
+                {
+                    if (renderer != null && highlightMaterial != null)
+                    {
+                        var originalMaterials = renderer.materials;
+                        Array.Resize(ref originalMaterials, originalMaterials.Length + 1);
+                        originalMaterials[^1] = highlightMaterial; // Add highlight material
+                        renderer.materials = originalMaterials;
+                    }
+                }
+
+                DisplaySelectedJoint(index);
             }
         }
 
-        void DisplaySelectedJoint(int selectedIndex)
+        void DisplaySelectedJoint(int index)
         {
-            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) 
+            if (index >= 0 && index < articulationChain.Length)
             {
-                return;
+                selectedJoint = articulationChain[index].name + " (" + index + ")";
             }
-            selectedJoint = articulationChain[selectedIndex].name + " (" + selectedIndex + ")";
+        }
+
+        public void SelectNextJoint()
+        {
+            selectedIndex = (selectedIndex + 1) % articulationChain.Length;
+            HighlightJoint(selectedIndex);
+        }
+
+        public void SelectPreviousJoint()
+        {
+            selectedIndex = (selectedIndex - 1 + articulationChain.Length) % articulationChain.Length;
+            HighlightJoint(selectedIndex);
         }
 
         private void UpdateDirection(int jointIndex)
@@ -115,14 +131,8 @@ namespace Unity.Robotics.UrdfImporter.Control
 
             float moveDirection = Input.GetAxis("Vertical");
             JointControl current = articulationChain[jointIndex].GetComponent<JointControl>();
-            if (previousIndex != jointIndex)
-            {
-                JointControl previous = articulationChain[previousIndex].GetComponent<JointControl>();
-                previous.direction = RotationDirection.None;
-                previousIndex = jointIndex;
-            }
 
-            if (current.controltype != control) 
+            if (current.controltype != control)
             {
                 UpdateControlType(current);
             }
@@ -135,24 +145,9 @@ namespace Unity.Robotics.UrdfImporter.Control
             {
                 current.direction = RotationDirection.Negative;
             }
-        }
-
-        private void StoreJointColors(int index)
-        {
-            Renderer[] materialLists = articulationChain[index].transform.GetChild(0).GetComponentsInChildren<Renderer>();
-            prevColor = new Color[materialLists.Length];
-            for (int counter = 0; counter < materialLists.Length; counter++)
+            else
             {
-                prevColor[counter] = MaterialExtensions.GetMaterialColor(materialLists[counter]);
-            }
-        }
-
-        private void ResetJointColors(int index)
-        {
-            Renderer[] previousRendererList = articulationChain[index].transform.GetChild(0).GetComponentsInChildren<Renderer>();
-            for (int counter = 0; counter < previousRendererList.Length; counter++)
-            {
-                MaterialExtensions.SetMaterialColor(previousRendererList[counter].material, prevColor[counter]);
+                current.direction = RotationDirection.None;
             }
         }
 
@@ -166,47 +161,6 @@ namespace Unity.Robotics.UrdfImporter.Control
                 drive.damping = damping;
                 joint.joint.xDrive = drive;
             }
-        }
-        
-        public void SelectNextJoint()
-        {
-            SetSelectedJointIndex(selectedIndex + 1);
-            Highlight(selectedIndex);
-        }
-
-        public void SelectPreviousJoint()
-        {
-            SetSelectedJointIndex(selectedIndex - 1);
-            Highlight(selectedIndex);
-        }
-
-        public void MoveJointPositive()
-        {
-            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
-            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
-            current.direction = RotationDirection.Positive;
-        }
-
-        public void MoveJointNegative()
-        {
-            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
-            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
-            current.direction = RotationDirection.Negative;
-        }
-
-        public void StopJointMovement()
-        {
-            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
-            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
-            current.direction = RotationDirection.None;
-        }
-
-        public void OnGUI()
-        {
-            GUIStyle centeredStyle = GUI.skin.GetStyle("Label");
-            centeredStyle.alignment = TextAnchor.UpperCenter;
-            GUI.Label(new Rect(Screen.width / 2 - 200, 10, 400, 20), "Press left/right arrow keys to select a robot joint.", centeredStyle);
-            GUI.Label(new Rect(Screen.width / 2 - 200, 30, 400, 20), "Press up/down arrow keys to move " + selectedJoint + ".", centeredStyle);
         }
     }
 }
