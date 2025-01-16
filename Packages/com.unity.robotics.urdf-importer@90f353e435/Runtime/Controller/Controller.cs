@@ -11,6 +11,7 @@ namespace Unity.Robotics.UrdfImporter.Control
     {
         private ArticulationBody[] articulationChain;
         private Renderer[] previousRenderers;
+        private int previousIndex;
 
         [InspectorReadOnly(hideInEditMode: true)]
         public string selectedJoint;
@@ -31,9 +32,10 @@ namespace Unity.Robotics.UrdfImporter.Control
         void Start()
         {
             previousRenderers = null;
-            selectedIndex = 1;
+            previousIndex = selectedIndex = 1;
             this.gameObject.AddComponent<FKRobot>();
             articulationChain = this.GetComponentsInChildren<ArticulationBody>();
+            articulationChain = Array.FindAll(articulationChain, joint => joint.CompareTag("robot"));
             int defDynamicVal = 10;
 
             foreach (ArticulationBody joint in articulationChain)
@@ -73,7 +75,6 @@ namespace Unity.Robotics.UrdfImporter.Control
             {
                 foreach (var renderer in previousRenderers)
                 {
-                    // Restore the original material
                     if (renderer != null)
                     {
                         renderer.materials = renderer.materials[..^1]; // Remove the last material (highlight)
@@ -112,14 +113,37 @@ namespace Unity.Robotics.UrdfImporter.Control
 
         public void SelectNextJoint()
         {
+            previousIndex = selectedIndex;
             selectedIndex = (selectedIndex + 1) % articulationChain.Length;
             HighlightJoint(selectedIndex);
         }
 
         public void SelectPreviousJoint()
         {
+            previousIndex = selectedIndex;
             selectedIndex = (selectedIndex - 1 + articulationChain.Length) % articulationChain.Length;
             HighlightJoint(selectedIndex);
+        }
+
+        public void MoveJointPositive()
+        {
+            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
+            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
+            current.direction = RotationDirection.Positive;
+        }
+
+        public void MoveJointNegative()
+        {
+            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
+            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
+            current.direction = RotationDirection.Negative;
+        }
+
+        public void StopJointMovement()
+        {
+            if (selectedIndex < 0 || selectedIndex >= articulationChain.Length) return;
+            var current = articulationChain[selectedIndex].GetComponent<JointControl>();
+            current.direction = RotationDirection.None;
         }
 
         private void UpdateDirection(int jointIndex)
@@ -131,6 +155,13 @@ namespace Unity.Robotics.UrdfImporter.Control
 
             float moveDirection = Input.GetAxis("Vertical");
             JointControl current = articulationChain[jointIndex].GetComponent<JointControl>();
+
+            if (previousIndex != jointIndex)
+            {
+                JointControl previous = articulationChain[previousIndex].GetComponent<JointControl>();
+                previous.direction = RotationDirection.None;
+                previousIndex = jointIndex;
+            }
 
             if (current.controltype != control)
             {
@@ -144,10 +175,6 @@ namespace Unity.Robotics.UrdfImporter.Control
             else if (moveDirection < 0)
             {
                 current.direction = RotationDirection.Negative;
-            }
-            else
-            {
-                current.direction = RotationDirection.None;
             }
         }
 
